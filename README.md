@@ -244,3 +244,9 @@ Paper ไม่จำลอง liquidation, maintenance margin, funding, order b
 - `app/strategy/`: interface ว่างรอ Strategy ที่สรุปแล้ว
 - `app/models/`, `app/utils/`: validated data, config, structured logging
 - `tests/`, `scripts/`, `examples/`: tests, local bootstrap/demo และ webhook template
+
+## V6 SOLUSDT 24/7 PAPER bridge
+
+See [V6_RUNBOOK.md](V6_RUNBOOK.md) for frozen Pine source, TradingView alerts,
+real public price polling, dedicated Compose deployment and Google Cloud VM steps.
+This prepares code only; no VM is provisioned and no real orders are enabled.

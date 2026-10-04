@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart unhealthy V6 paper bot
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/swing-trading-bot/deploy/v6-watchdog.sh

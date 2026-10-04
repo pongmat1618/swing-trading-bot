@@ -45,8 +45,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health(request: Request):
         engine = request.app.state.engine
         alive = bool(engine.thread and engine.thread.is_alive() and engine.healthy)
+        feed = engine.feed.status() if engine.feed else None
+        ready = alive and (engine.feed is None or engine.feed.fresh())
         return JSONResponse(
-            {"mode": "PAPER", "worker_alive": alive}, status_code=200 if alive else 503
+            {"mode": "PAPER", "worker_alive": alive, "market_feed": feed},
+            status_code=200 if ready else 503,
         )
 
     @app.get("/state", dependencies=[Depends(admin)])
