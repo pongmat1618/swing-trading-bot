@@ -1,0 +1,11 @@
+{
+  "secret": "REPLACE_WITH_WEBHOOK_SECRET",
+  "signal_id": "EXTERNAL-V1-BTCUSDT-LONG-{{timenow}}",
+  "timestamp": "{{timenow}}",
+  "symbol": "BTCUSDT",
+  "action": "LONG",
+  "strategy": "EXTERNAL-V1",
+  "timeframe": "4H",
+  "price": {{close}},
+  "stop_loss": REPLACE_WITH_NUMERIC_STRATEGY_STOP
+}
