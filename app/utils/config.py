@@ -34,6 +34,11 @@ class Settings(BaseModel):
     log_path: Path = Path("logs/orders.jsonl")
     kill_switch_path: Path = Path("STOP_TRADING")
     trading_enabled: bool = True
+    strategy_profile: Literal["EXTERNAL", "V6_SOL_LONG"] = "EXTERNAL"
+    market_feed_enabled: bool = False
+    market_poll_seconds: int = Field(default=5, ge=1, le=60)
+    market_stale_seconds: int = Field(default=30, ge=10, le=300)
+    max_entry_deviation: Decimal = Field(default=Decimal("0.005"), gt=0, le=Decimal("0.1"))
     webhook_secret: SecretStr = SecretStr("")
     admin_token: SecretStr = SecretStr("")
 
@@ -71,6 +76,17 @@ def load_settings() -> Settings:
 def check_runtime(settings: Settings) -> None:
     if settings.mode != "PAPER":
         raise ValueError("V1 runs PAPER only. TESTNET and LIVE execution are not enabled.")
+    if settings.strategy_profile == "V6_SOL_LONG":
+        if (
+            settings.symbol,
+            settings.timeframe,
+            settings.reward_risk_ratio,
+            settings.risk_per_trade,
+            settings.leverage,
+        ) != ("SOLUSDT", "5m", Decimal("2"), Decimal("0.01"), 5):
+            raise ValueError("V6 profile requires SOLUSDT 5m, 1% risk, 2R, leverage 5")
+        if not settings.market_feed_enabled:
+            raise ValueError("V6 requires the automatic market feed")
     for secret in (settings.webhook_secret, settings.admin_token):
         if len(secret.get_secret_value()) < 32:
             raise ValueError(

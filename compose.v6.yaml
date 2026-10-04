@@ -1,0 +1,42 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      BOT_MODE: PAPER
+      BOT_CONFIG: config.v6.yaml
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./config.v6.yaml:/app/config.v6.yaml:ro
+      - v6-data:/app/data
+      - v6-logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  proxy:
+    image: caddy:2.10
+    environment:
+      BOT_DOMAIN: ${BOT_DOMAIN:?Set BOT_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+volumes:
+  v6-data:
+  v6-logs:
+  caddy-data:
+  caddy-config:

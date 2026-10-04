@@ -1,0 +1,31 @@
+mode: PAPER
+symbol: SOLUSDT
+timeframe: 5m
+leverage: 5
+risk_per_trade: "0.01"
+reward_risk_ratio: "2"
+max_open_positions: 1
+max_notional: "10000"
+max_quantity: "10000"
+margin_utilization: "0.9"
+# Simulation settings, not the actual balance or fee schedule of an exchange.
+paper_initial_balance: "1000"
+paper_fee_rate: "0.0005"
+paper_slippage_bps: "2"
+quantity_step: "0.001"
+price_tick: "0.01"
+min_quantity: "0.001"
+min_notional: "5"
+max_signal_age_seconds: 300
+max_future_seconds: 30
+queue_limit: 1000
+database_path: data/v6-paper.sqlite3
+log_path: logs/orders.jsonl
+kill_switch_path: STOP_TRADING
+trading_enabled: true
+
+strategy_profile: V6_SOL_LONG
+market_feed_enabled: true
+market_poll_seconds: 5
+market_stale_seconds: 30
+max_entry_deviation: "0.005"

@@ -1,0 +1,175 @@
+//@version=6
+strategy(
+     "V6.0 SOLUSDT Long Core - Frozen",
+     overlay = true,
+     initial_capital = 1000,
+     pyramiding = 0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 2,
+     process_orders_on_close = false,
+     calc_on_order_fills = true,
+     calc_on_every_tick = false,
+     margin_long = 20
+)
+
+// Webhook bridge: original frozen entry rules below remain unchanged.
+webhookToken = input.string("", "PAPER webhook token (32+ alphanumeric characters)")
+if barstate.isfirst and (timeframe.period != "5" or syminfo.ticker != "SOLUSDT.P" or syminfo.prefix != "BINANCE")
+    runtime.error("Use BINANCE:SOLUSDT.P on the 5-minute chart")
+
+// V6.0 FROZEN STRATEGY
+// Intended chart: SOLUSDT, 5-minute
+// 4H: HH+HL, Close>EMA25, EMA25 rising
+// 15m: EMA25 pullback, bullish reaction, HL preserved, close position >= 60%
+// 5m: micro break OR bullish rejection, RSI OR MACD confirmation
+// Long only, Structural SL - 0.10x ATR15, TP=2R, Risk=1%, Max notional=5x
+// Closed 4H/15m bars only. Funding not modeled.
+
+riskPct          = input.float(1.0, "Risk per trade (%)", minval = 0.1, step = 0.1)
+maxLeverage      = input.float(5.0, "Max notional leverage", minval = 1.0, step = 0.5)
+rr               = input.float(2.0, "Take Profit (R)", minval = 0.5, step = 0.25)
+emaLen           = input.int(25, "EMA Length", minval = 1)
+atrLen           = input.int(14, "ATR Length", minval = 1)
+atrBuffer        = input.float(0.10, "SL ATR buffer (15m)", minval = 0.0, step = 0.05)
+zoneAboveATR     = input.float(0.35, "15m pullback zone above EMA (ATR)", step = 0.05)
+zoneBelowATR     = input.float(1.00, "15m pullback zone below EMA (ATR)", step = 0.05)
+reactionClosePct = input.float(0.60, "15m bullish close-position minimum", minval = 0.5, maxval = 1.0, step = 0.05)
+setupExpiryMin   = input.int(90, "Setup expiry (minutes)", minval = 15, step = 15)
+showLevels       = input.bool(true, "Show active SL / TP")
+showHTFEMA       = input.bool(true, "Show confirmed 15m EMA25")
+
+rsi5 = ta.rsi(close, 14)
+[macd5, signal5, hist5] = ta.macd(close, 12, 26, 9)
+
+[
+ h4h1, h4h2, h4h3, h4h4, h4h5, h4h6, h4h7, h4h8,
+ h4l1, h4l2, h4l3, h4l4, h4l5, h4l6, h4l7, h4l8,
+ h4c1, h4ema1, h4ema3
+] = request.security(
+     syminfo.tickerid,
+     "240",
+     [
+      high[1], high[2], high[3], high[4], high[5], high[6], high[7], high[8],
+      low[1],  low[2],  low[3],  low[4],  low[5],  low[6],  low[7],  low[8],
+      close[1], ta.ema(close, emaLen)[1], ta.ema(close, emaLen)[3]
+     ],
+     lookahead = barmerge.lookahead_on
+)
+
+recentHigh4 = math.max(math.max(h4h1, h4h2), math.max(h4h3, h4h4))
+priorHigh4  = math.max(math.max(h4h5, h4h6), math.max(h4h7, h4h8))
+recentLow4  = math.min(math.min(h4l1, h4l2), math.min(h4l3, h4l4))
+priorLow4   = math.min(math.min(h4l5, h4l6), math.min(h4l7, h4l8))
+
+regime4H = recentHigh4 > priorHigh4 and recentLow4 > priorLow4 and h4c1 > h4ema1 and h4ema1 > h4ema3
+
+[
+ m15o1, m15h1, m15l1, m15c1,
+ m15ema1, m15atr1,
+ m15l2, m15l3, m15l4, m15l5
+] = request.security(
+     syminfo.tickerid,
+     "15",
+     [
+      open[1], high[1], low[1], close[1],
+      ta.ema(close, emaLen)[1],
+      ta.atr(atrLen)[1],
+      low[2], low[3], low[4], low[5]
+     ],
+     lookahead = barmerge.lookahead_on
+)
+
+prior4Low15 = math.min(math.min(m15l2, m15l3), math.min(m15l4, m15l5))
+range15     = m15h1 - m15l1
+closePos15  = range15 > 0 ? (m15c1 - m15l1) / range15 : 0.5
+
+pullback15 = regime4H and m15l1 <= m15ema1 + zoneAboveATR * m15atr1 and m15l1 >= m15ema1 - zoneBelowATR * m15atr1 and m15c1 > m15ema1 and m15c1 > m15o1 and m15l1 > prior4Low15 and closePos15 >= reactionClosePct
+
+new15m = ta.change(time("15")) != 0
+
+var bool  setupActive = false
+var float setupSwing  = na
+var float setupATR15  = na
+var int   setupExpiry = na
+
+if new15m and strategy.position_size == 0
+    if pullback15
+        setupActive := true
+        setupSwing  := math.min(m15l1, prior4Low15)
+        setupATR15  := m15atr1
+        setupExpiry := time + setupExpiryMin * 60 * 1000
+
+if setupActive and time > setupExpiry
+    setupActive := false
+    setupSwing  := na
+    setupATR15  := na
+    setupExpiry := na
+
+prev3High = ta.highest(high[1], 3)
+prev2Low  = ta.lowest(low[1], 2)
+
+microBreak = close > prev3High and close > open
+bullReject = low < prev2Low and close > prev2Low and close > open
+rsiBull    = rsi5 > 50 and rsi5 >= rsi5[1]
+macdBull   = macd5 > signal5 and hist5 >= hist5[1]
+trigger5m  = (microBreak or bullReject) and (rsiBull or macdBull)
+
+var float pendingStop = na
+var float activeStop  = na
+var float activeTP    = na
+
+canEnter = setupActive and strategy.position_size == 0 and trigger5m and not na(setupSwing) and not na(setupATR15)
+
+if canEnter
+    stopCandidate = setupSwing - atrBuffer * setupATR15
+    estimatedDist = close - stopCandidate
+
+    if estimatedDist > syminfo.mintick
+        riskCash      = strategy.equity * (riskPct / 100.0)
+        qtyByRisk     = riskCash / estimatedDist
+        qtyByLeverage = (strategy.equity * maxLeverage) / close
+        orderQty      = math.min(qtyByRisk, qtyByLeverage)
+
+        if orderQty > 0
+            if barstate.isrealtime and barstate.isconfirmed and str.length(webhookToken) >= 32
+                stamp = str.format_time(time_close, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC")
+                msg = '{"signal_id":"V6_SOL_LONG:' + str.tostring(time_close) + '","timestamp":"' + stamp + '","symbol":"SOLUSDT","action":"LONG","strategy":"V6_SOL_LONG","timeframe":"5m","price":' + str.tostring(close, format.mintick) + ',"stop_loss":' + str.tostring(stopCandidate, format.mintick) + ',"secret":"' + webhookToken + '"}'
+                alert(msg, alert.freq_once_per_bar_close)
+            pendingStop := stopCandidate
+            strategy.entry("V6 Long", strategy.long, qty = orderQty)
+
+    setupActive := false
+    setupSwing  := na
+    setupATR15  := na
+    setupExpiry := na
+
+newLongFilled = strategy.position_size > 0 and strategy.position_size[1] <= 0
+
+if newLongFilled and not na(pendingStop)
+    activeStop := pendingStop
+    actualDist = strategy.position_avg_price - activeStop
+
+    if actualDist > syminfo.mintick
+        activeTP := strategy.position_avg_price + rr * actualDist
+    else
+        strategy.close("V6 Long", comment = "Invalid stop distance")
+        activeStop := na
+        activeTP   := na
+
+if strategy.position_size > 0 and not na(activeStop) and not na(activeTP)
+    strategy.exit("V6 Exit", from_entry = "V6 Long", stop = activeStop, limit = activeTP)
+
+closedThisBar = strategy.position_size == 0 and strategy.position_size[1] > 0
+if closedThisBar
+    pendingStop := na
+    activeStop  := na
+    activeTP    := na
+
+plot(showHTFEMA ? m15ema1 : na, "Confirmed 15m EMA25", linewidth = 2)
+plot(showLevels and strategy.position_size > 0 ? activeStop : na, "Active Structural SL", style = plot.style_linebr, linewidth = 2)
+plot(showLevels and strategy.position_size > 0 ? activeTP : na, "Active 2R TP", style = plot.style_linebr, linewidth = 2)
+bgcolor(regime4H ? color.new(color.green, 92) : na, title = "4H Bull Regime")
+plotshape(new15m and pullback15 and strategy.position_size == 0, title = "15m Pullback Setup", style = shape.circle, location = location.belowbar, size = size.tiny, text = "15")
+plotshape(canEnter, title = "5m Entry Trigger", style = shape.triangleup, location = location.belowbar, size = size.small, text = "V6")
+plot(strategy.equity, "Strategy Equity", display = display.data_window)

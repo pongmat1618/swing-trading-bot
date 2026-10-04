@@ -1,0 +1,9 @@
+{$BOT_DOMAIN} {
+    @webhook path /webhook/tradingview
+    handle @webhook {
+        reverse_proxy bot:8000
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

@@ -2,8 +2,9 @@
 
 ## Scope and architecture
 Python 3.12+, FastAPI, SQLite durable queue, external TradingView signals.
-This is a PAPER execution service. Strategy rules, automatic market data, and
-V6 are not implemented. Never invent V6 rules or describe demo P&L as backtest results.
+This is a PAPER execution service. The V6_SOL_LONG profile uses the frozen
+Pine webhook bridge and a public last-trade price feed; EXTERNAL keeps V1 behavior.
+Standalone Python V6 signal generation is not implemented. Never invent V6 rules or describe demo P&L as backtest results.
 Binance adapter has mocked tests but is not wired into the engine.
 Preserve PAPER defaults and the startup rejection of TESTNET/LIVE unless a
 separate task explicitly authorizes implementing those modes.

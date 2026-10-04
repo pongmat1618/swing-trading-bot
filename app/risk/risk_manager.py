@@ -48,7 +48,9 @@ class RiskManager:
         margin_cap = (
             available * s.margin_utilization / (entry / s.leverage + entry * s.paper_fee_rate)
         )
-        maximum = min(s.max_quantity, s.max_notional / entry, margin_cap)
+        maximum = min(
+            s.max_quantity, s.max_notional / entry, equity * s.leverage / entry, margin_cap
+        )
         quantity = position_size(budget, loss_per_unit, maximum, s.quantity_step)
         if quantity < s.min_quantity or quantity * entry < s.min_notional:
             raise ValueError("position below exchange simulation minimums")

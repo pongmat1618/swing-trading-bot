@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.exchange.paper import PaperExchange
+from app.market_feed import MarketFeed
 from app.models.signal import Action, Signal
 from app.risk.risk_manager import RiskManager
 from app.storage import Store, now_iso
@@ -15,6 +16,11 @@ from app.utils.logger import create_logger
 def validate_scope(signal: Signal, settings: Settings) -> None:
     if signal.symbol != settings.symbol or signal.timeframe != settings.timeframe:
         raise ValueError("symbol or timeframe is not allowed")
+    if settings.strategy_profile == "V6_SOL_LONG":
+        if signal.strategy != "V6_SOL_LONG" or signal.action == Action.SHORT:
+            raise ValueError("V6 profile only accepts V6 long entries and close actions")
+        if signal.action == Action.LONG and signal.take_profit is not None:
+            raise ValueError("V6 TP is calculated from the paper fill; omit take_profit")
     age = (datetime.now(UTC) - signal.timestamp).total_seconds()
     if age > settings.max_signal_age_seconds or age < -settings.max_future_seconds:
         raise ValueError("signal timestamp is stale or too far in the future")
@@ -30,6 +36,7 @@ class Engine:
         self.wake_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.healthy = True
+        self.feed = MarketFeed(self) if settings.market_feed_enabled else None
         with self.store.transaction() as conn:
             identity = f"PAPER:{settings.symbol}"
             stored = Store.get(conn, "identity")
@@ -43,13 +50,18 @@ class Engine:
             and Store.get(conn, "enabled") == "true"
             and not self.settings.kill_switch_path.exists()
             and self.healthy
+            and (self.feed is None or self.feed.fresh())
         )
 
     def start(self) -> None:
         self.thread = threading.Thread(target=self._worker, name="paper-worker", daemon=True)
         self.thread.start()
+        if self.feed:
+            self.feed.start()
 
     def stop(self) -> None:
+        if self.feed:
+            self.feed.stop()
         self.stop_event.set()
         self.wake_event.set()
         if self.thread:
@@ -107,6 +119,13 @@ class Engine:
             return {"status": "SKIPPED", "reason": "new entries disabled"}
         if entry and ex.get_position(signal.symbol) is not None:
             return {"status": "SKIPPED", "reason": "existing position"}
+        if entry and self.settings.strategy_profile == "V6_SOL_LONG":
+            price = self.feed.price if self.feed else None
+            if price is None:
+                raise ValueError("market price unavailable")
+            if abs(price / signal.price - 1) > self.settings.max_entry_deviation:
+                raise ValueError("entry price moved beyond allowed deviation")
+            signal = signal.model_copy(update={"price": price})
         ex.set_price(signal.symbol, signal.price)
         triggered = ex.check_triggers(signal.symbol)
         if not entry:
